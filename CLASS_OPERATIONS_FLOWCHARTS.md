@@ -1,879 +1,615 @@
-# Class Operations Flowcharts - Complete Implementation Guide
+# Complete Class Management System - Comprehensive Flowchart
 
-This document provides comprehensive flowcharts for implementing class addition, merging, and splitting operations with project-specific classes.
-
----
-
-## Table of Contents
-1. [Class Addition Flowchart](#1-class-addition-flowchart)
-2. [Class Merging Flowchart](#2-class-merging-flowchart)
-3. [Class Splitting Flowchart](#3-class-splitting-flowchart)
-4. [Database Schema Changes](#database-schema-changes)
-5. [Backend Endpoints Summary](#backend-endpoints-summary)
-6. [Frontend Components Summary](#frontend-components-summary)
+This document provides a comprehensive, detailed flowchart covering all class management operations: Project Creation, Class Addition, Class Merging, and Class Splitting.
 
 ---
 
-## 1. Class Addition Flowchart
+## Complete System Flowchart
 
 ```mermaid
 flowchart TD
-    Start([User Initiates Class Addition]) --> CheckProject{Project Selected?}
-    CheckProject -->|No| ShowError[Show Error: Select Project First]
-    CheckProject -->|Yes| ShowForm[Display Class Creation Form]
+    Start([User Accesses System]) --> MainMenu{Select Operation}
     
-    ShowForm --> UserInput[User Enters:<br/>- class_name<br/>- formatted_class_name<br/>- description]
+    %% PROJECT CREATION PATH
+    MainMenu -->|Create Project| ProjectStart([Project Creation])
+    ProjectStart --> CheckAuth{User Authenticated?}
+    CheckAuth -->|No| AuthError[Show Error:<br/>Must be logged in]
+    AuthError --> Start
     
-    UserInput --> ValidateInput{Validate Input}
-    ValidateInput -->|Invalid| ShowValidationError[Show Validation Errors]
-    ShowValidationError --> UserInput
+    CheckAuth -->|Yes| ShowProjectForm[Display Project Form]
+    ShowProjectForm --> UserProjectInput[User Enters:<br/>- project_code 3 chars<br/>- project_title<br/>- description<br/>- poc_name, poc_email, poc_phone<br/>- latitude, longitude<br/>- area, dates, privacy]
     
-    ValidateInput -->|Valid| CheckModelClass{Class in Model<br/>Training Set?}
+    UserProjectInput --> ValidateProject{Validate Project Data}
+    ValidateProject -->|Invalid Email| EmailError[Show Error:<br/>Invalid email format]
+    EmailError --> UserProjectInput
     
-    CheckModelClass -->|No| ShowWarning[Show Warning:<br/>Class not in model.<br/>Will require manual classification]
-    ShowWarning --> UserConfirm{User Confirms?}
-    UserConfirm -->|No| UserInput
-    UserConfirm -->|Yes| CreateClass
+    ValidateProject -->|Invalid Code| CodeError[Show Error:<br/>Code must be 3 alphanumeric]
+    CodeError --> UserProjectInput
     
-    CheckModelClass -->|Yes| CreateClass[POST /create_class<br/>Backend: Create Class]
+    ValidateProject -->|Invalid Phone| PhoneError[Show Error:<br/>Invalid phone format]
+    PhoneError --> UserProjectInput
     
-    CreateClass --> BackendValidate{Backend Validation}
-    BackendValidate -->|Class Exists| ReturnError[Return Error:<br/>Class already exists<br/>for this project]
-    ReturnError --> UserInput
+    ValidateProject -->|Invalid Coords| CoordError[Show Error:<br/>Invalid lat/lon]
+    CoordError --> UserProjectInput
     
-    BackendValidate -->|Project Invalid| ReturnProjectError[Return Error:<br/>Project does not exist]
-    ReturnProjectError --> ShowError
+    ValidateProject -->|Title Has URL| TitleError[Show Error:<br/>Title cannot contain URLs]
+    TitleError --> UserProjectInput
     
-    BackendValidate -->|Valid| InsertDB[(Database Operation)]
+    ValidateProject -->|All Valid| CheckProjectExists{Project Code<br/>Already Exists?}
     
-    InsertDB --> InsertClassDetails[INSERT INTO class_details<br/>project_code, class_name,<br/>formatted_class_name,<br/>description, is_model_class]
+    CheckProjectExists -->|Yes| UpdateProject[POST /submit<br/>Backend: Update Project]
+    CheckProjectExists -->|No| CreateProject[POST /submit<br/>Backend: Create Project]
     
-    InsertClassDetails --> CheckUnique{Unique Constraint<br/>project_code + class_name?}
-    CheckUnique -->|Violation| ReturnError
-    CheckUnique -->|OK| CommitDB[COMMIT Transaction]
+    UpdateProject --> UpdateDB[(Database: UPDATE projects)]
+    UpdateDB --> UpdateSuccess[Return Success:<br/>Project Updated]
     
-    CommitDB --> ReturnSuccess[Return Success Response]
-    ReturnSuccess --> UpdateFrontend[Update Frontend UI]
+    CreateProject --> InsertProjectDB[(Database: INSERT INTO projects)]
+    InsertProjectDB --> CheckClasses{Classes<br/>Provided?}
     
-    UpdateFrontend --> RefreshClassList[Refresh Class List<br/>for Project]
-    RefreshClassList --> ShowSuccess[Show Success Message]
-    ShowSuccess --> End([Class Added Successfully])
+    CheckClasses -->|Yes| ProcessClasses[Process Classes Array]
+    CheckClasses -->|No| ProjectCreated[Project Created<br/>No Classes]
     
-    style Start fill:#e1f5ff
-    style End fill:#c8e6c9
-    style InsertDB fill:#fff3e0
-    style ReturnError fill:#ffcdd2
-    style ShowWarning fill:#fff9c4
-```
-
-### Backend Changes for Class Addition
-
-**File: `main.py`**
-
-```python
-@app.post("/create_class")
-async def create_class(data: dict):
-    """Create a new class for a specific project"""
-    try:
-        conn = sqlite3.connect(sqlite_db_path)
-        cursor = conn.cursor()
-        
-        project_code = data.get('project_code')
-        class_name = data.get('class_name')
-        formatted_class_name = data.get('formatted_class_name', class_name)
-        description = data.get('description', '')
-        
-        # Validate project exists
-        cursor.execute("SELECT * FROM projects WHERE project_code = ?", (project_code,))
-        if not cursor.fetchone():
-            conn.close()
-            return {"error": f"Project '{project_code}' does not exist"}
-        
-        # Check if class already exists for this project
-        cursor.execute('''
-            SELECT * FROM class_details 
-            WHERE project_code = ? AND class_name = ?
-        ''', (project_code, class_name))
-        
-        if cursor.fetchone():
-            conn.close()
-            return {"error": "Class already exists", 
-                   "message": f"Class '{class_name}' already exists for project '{project_code}'"}
-        
-        # Check if class is in model's training set
-        is_model_class = 1 if class_name in class_names else 0
-        
-        # Insert new class
-        cursor.execute('''
-            INSERT INTO class_details 
-            (project_code, class_name, formatted_class_name, description, is_model_class)
-            VALUES (?, ?, ?, ?, ?)
-        ''', (project_code, class_name, formatted_class_name, description, is_model_class))
-        
-        conn.commit()
-        conn.close()
-        
-        response = {
-            "message": f"Class '{class_name}' created successfully for project '{project_code}'!",
-            "is_model_class": bool(is_model_class)
-        }
-        
-        if not is_model_class:
-            response["note"] = "This class is not in the model's training set. Images will be classified as 'unclassified' until manually reviewed."
-        
-        return response
-        
-    except sqlite3.IntegrityError as e:
-        return {"error": "Database constraint violation", "message": str(e)}
-    except Exception as e:
-        return {"error": f"Failed to create class: {str(e)}"}
-```
-
-### Frontend Changes for Class Addition
-
-**File: `form.html` or `class.html`**
-
-```javascript
-async function createClass() {
-    const projectCode = getSelectedProject();
-    const className = document.getElementById('class_name_input').value.trim();
-    const formattedName = document.getElementById('formatted_name_input').value.trim();
-    const description = document.getElementById('description_input').value.trim();
+    ProcessClasses --> LoopClasses{For Each Class}
+    LoopClasses --> ValidateClass{Validate Class Name}
+    ValidateClass -->|Invalid Format| ClassFormatError[Error:<br/>lowercase_underscores only]
+    ClassFormatError --> LoopClasses
     
-    if (!projectCode) {
-        showError('Please select a project first');
-        return;
-    }
+    ValidateClass -->|Valid| CheckModelClass{Class in Model<br/>Training Set?}
+    CheckModelClass -->|Yes| SetModelFlag[Set is_model_class = 1]
+    CheckModelClass -->|No| SetManualFlag[Set is_model_class = 0<br/>Show Warning]
     
-    if (!className || !formattedName) {
-        showError('Class name and formatted name are required');
-        return;
-    }
+    SetModelFlag --> InsertClassDB[(INSERT INTO class_details<br/>project_code, class_name,<br/>formatted_class_name,<br/>description, is_model_class)]
+    SetManualFlag --> InsertClassDB
     
-    // Validate class name format (lowercase, underscores)
-    if (!/^[a-z0-9_]+$/.test(className)) {
-        showError('Class name must be lowercase with underscores only');
-        return;
-    }
+    InsertClassDB --> CheckMoreClasses{More Classes?}
+    CheckMoreClasses -->|Yes| LoopClasses
+    CheckMoreClasses -->|No| CommitProject[COMMIT Transaction]
     
-    try {
-        const response = await fetch('/plankton_classifier/create_class', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                project_code: projectCode,
-                class_name: className,
-                formatted_class_name: formattedName,
-                description: description
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.error) {
-            showError(result.message || result.error);
-        } else {
-            showSuccess(result.message);
-            if (result.note) {
-                showWarning(result.note);
-            }
-            refreshClassList(projectCode);
-            clearForm();
-        }
-    } catch (error) {
-        showError('Failed to create class: ' + error.message);
-    }
-}
-```
-
----
-
-## 2. Class Merging Flowchart
-
-```mermaid
-flowchart TD
-    Start([User Initiates Class Merge]) --> SelectSource[User Selects Source Classes<br/>Multiple classes to merge]
+    CommitProject --> ProjectCreated
+    ProjectCreated --> ShowProjectSuccess[Show Success Message]
+    ShowProjectSuccess --> EndProject([Project Created Successfully])
     
-    SelectSource --> SelectTarget[User Selects Target Class<br/>Class to merge into]
+    UpdateSuccess --> EndProject
     
-    SelectTarget --> ValidateSelection{Validate Selection}
-    ValidateSelection -->|Same Project?| CheckProject{All Classes<br/>Same Project?}
-    ValidateSelection -->|Invalid| ShowError[Show Error:<br/>Invalid Selection]
-    ShowError --> SelectSource
+    %% CLASS ADDITION PATH
+    MainMenu -->|Add Class| ClassAddStart([Class Addition])
+    ClassAddStart --> CheckProjectSelected{Project Selected?}
+    CheckProjectSelected -->|No| ProjectError[Show Error:<br/>Select Project First]
+    ProjectError --> ClassAddStart
     
-    CheckProject -->|No| ShowProjectError[Show Error:<br/>Cannot merge classes<br/>from different projects]
-    ShowProjectError --> SelectSource
+    CheckProjectSelected -->|Yes| ShowClassForm[Display Class Creation Form]
+    ShowClassForm --> UserClassInput[User Enters:<br/>- class_name lowercase_underscores<br/>- formatted_class_name<br/>- description optional]
     
-    CheckProject -->|Yes| CheckTargetExists{Target Class<br/>Exists?}
-    CheckTargetExists -->|No| ShowTargetError[Show Error:<br/>Target class does not exist]
-    ShowTargetError --> SelectTarget
+    UserClassInput --> ValidateClassInput{Validate Input}
+    ValidateClassInput -->|Empty Name| NameError[Show Error:<br/>Class name required]
+    NameError --> UserClassInput
     
-    CheckTargetExists -->|Yes| ShowPreview[Show Preview:<br/>- Source classes<br/>- Target class<br/>- Image count per class]
+    ValidateClassInput -->|Invalid Format| FormatError[Show Error:<br/>Must be lowercase_underscores]
+    FormatError --> UserClassInput
     
-    ShowPreview --> UserConfirm{User Confirms Merge?}
-    UserConfirm -->|No| Cancel[Cancel Operation]
-    Cancel --> End
+    ValidateClassInput -->|Valid| CheckModelClassAdd{Class in Model<br/>Training Set?}
     
-    UserConfirm -->|Yes| StartTransaction[Start Database Transaction]
+    CheckModelClassAdd -->|No| ShowModelWarning[Show Warning:<br/>Class not in model.<br/>Will require manual classification]
+    ShowModelWarning --> UserConfirm{User Confirms?}
+    UserConfirm -->|No| UserClassInput
+    UserConfirm -->|Yes| CreateClassAPI[POST /create_class]
     
-    StartTransaction --> GetImageCounts[Get Image Counts<br/>for Each Source Class]
+    CheckModelClassAdd -->|Yes| CreateClassAPI
     
-    GetImageCounts --> UpdateImages[Update image_data Table]
+    CreateClassAPI --> BackendValidate{Backend Validation}
+    BackendValidate -->|Project Invalid| ReturnProjectErr[Return Error:<br/>Project does not exist]
+    ReturnProjectErr --> ProjectError
     
-    UpdateImages --> LoopImages{For Each Source Class}
-    LoopImages --> UpdateImageData[UPDATE image_data<br/>SET class_name = target_class<br/>WHERE class_name = source_class<br/>AND project_code = ?]
+    BackendValidate -->|Class Exists| ReturnClassErr[Return Error:<br/>Class already exists<br/>for this project]
+    ReturnClassErr --> UserClassInput
     
-    UpdateImageData --> MoveFiles[Move Physical Files]
+    BackendValidate -->|Valid| InsertClassDetails[(Database: INSERT INTO class_details<br/>project_code, class_name,<br/>formatted_class_name,<br/>description, is_model_class)]
     
-    MoveFiles --> LoopFolders{For Each Source Class Folder}
-    LoopFolders --> GetSourcePath[Get Source Path:<br/>project/year/month/source_class/]
+    InsertClassDetails --> CheckUniqueConstraint{Unique Constraint<br/>project_code + class_name?}
+    CheckUniqueConstraint -->|Violation| ReturnClassErr
+    CheckUniqueConstraint -->|OK| CommitClass[COMMIT Transaction]
     
-    GetSourcePath --> GetTargetPath[Get Target Path:<br/>project/year/month/target_class/]
+    CommitClass --> ReturnClassSuccess[Return Success Response<br/>with is_model_class flag]
+    ReturnClassSuccess --> UpdateClassUI[Update Frontend UI]
+    UpdateClassUI --> RefreshClassList[Refresh Class List<br/>for Project]
+    RefreshClassList --> ShowClassSuccess[Show Success Message]
+    ShowClassSuccess --> EndClassAdd([Class Added Successfully])
+    
+    %% CLASS MERGING PATH
+    MainMenu -->|Merge Classes| MergeStart([Class Merging])
+    MergeStart --> CheckProjectMerge{Project Selected?}
+    CheckProjectMerge -->|No| MergeProjectError[Show Error:<br/>Select Project First]
+    MergeProjectError --> MergeStart
+    
+    CheckProjectMerge -->|Yes| LoadProjectClasses[Load Classes for Project]
+    LoadProjectClasses --> ShowClassList[Display Class List<br/>with Multi-Select]
+    ShowClassList --> UserSelectSources[User Selects Source Classes<br/>2 or more classes to merge]
+    
+    UserSelectSources --> CheckSelection{At Least 2<br/>Classes Selected?}
+    CheckSelection -->|No| SelectionError[Show Error:<br/>Select at least 2 classes]
+    SelectionError --> UserSelectSources
+    
+    CheckSelection -->|Yes| UserSelectTarget[User Selects Target Class<br/>Class to merge into]
+    UserSelectTarget --> ValidateTarget{Target Class<br/>Selected?}
+    ValidateTarget -->|No| TargetError[Show Error:<br/>Select target class]
+    TargetError --> UserSelectTarget
+    
+    ValidateTarget -->|Yes| CheckSameProject{All Classes<br/>Same Project?}
+    CheckSameProject -->|No| ProjectMismatch[Show Error:<br/>Cannot merge classes<br/>from different projects]
+    ProjectMismatch --> UserSelectSources
+    
+    CheckSameProject -->|Yes| CheckTargetExists{Target Class<br/>Exists?}
+    CheckTargetExists -->|No| TargetNotExists[Show Error:<br/>Target class does not exist]
+    TargetNotExists --> UserSelectTarget
+    
+    CheckTargetExists -->|Yes| CheckTargetInSources{Target in<br/>Source List?}
+    CheckTargetInSources -->|Yes| TargetInSources[Show Error:<br/>Target cannot be<br/>in source list]
+    TargetInSources --> UserSelectTarget
+    
+    CheckTargetInSources -->|No| GetImageCounts[Get Image Counts<br/>for Each Source Class]
+    GetImageCounts --> ShowMergePreview[Show Preview:<br/>- Source classes list<br/>- Target class<br/>- Image count per class<br/>- Total images to move]
+    
+    ShowMergePreview --> UserConfirmMerge{User Confirms Merge?}
+    UserConfirmMerge -->|No| CancelMerge[Cancel Operation]
+    CancelMerge --> EndMerge
+    
+    UserConfirmMerge -->|Yes| StartMergeTransaction[Start Database Transaction<br/>BEGIN TRANSACTION]
+    
+    StartMergeTransaction --> LoopMergeClasses{For Each Source Class}
+    LoopMergeClasses --> UpdateImageData[(UPDATE image_data<br/>SET class_name = target_class<br/>WHERE class_name = source_class<br/>AND bin_name IN<br/>SELECT bin_name FROM bin_data<br/>WHERE project_code = ?)]
+    
+    UpdateImageData --> GetYearMonth[Extract year/month<br/>from bin_name pattern]
+    GetYearMonth --> LoopFolders{For Each Year/Month<br/>Combination}
+    
+    LoopFolders --> GetSourcePath[Get Source Path:<br/>data_directory/project/year/month/source_class/]
+    GetSourcePath --> GetTargetPath[Get Target Path:<br/>data_directory/project/year/month/target_class/]
     
     GetTargetPath --> CheckTargetFolder{Target Folder<br/>Exists?}
-    CheckTargetFolder -->|No| CreateFolder[Create Target Folder]
-    CheckTargetFolder -->|Yes| MoveFile[Move Image Files]
-    CreateFolder --> MoveFile
+    CheckTargetFolder -->|No| CreateTargetFolder[Create Target Folder<br/>os.makedirs target_path]
+    CheckTargetFolder -->|Yes| MoveImageFiles
     
-    MoveFile --> UpdateFileSystem[Update File System:<br/>Move all images from<br/>source to target folder]
+    CreateTargetFolder --> MoveImageFiles[Move Image Files<br/>shutil.move all files<br/>from source to target]
     
-    UpdateFileSystem --> CheckMoreFolders{More Source<br/>Classes?}
+    MoveImageFiles --> CheckEmptySource{Source Folder<br/>Empty?}
+    CheckEmptySource -->|Yes| RemoveSourceFolder[Remove Empty Folder<br/>os.rmdir source_path]
+    CheckEmptySource -->|No| CheckMoreFolders
+    
+    RemoveSourceFolder --> CheckMoreFolders{More Year/Month<br/>Combinations?}
     CheckMoreFolders -->|Yes| LoopFolders
-    CheckMoreFolders -->|No| CheckMoreImages{More Source<br/>Classes?}
+    CheckMoreFolders -->|No| CheckMoreSourceClasses{More Source<br/>Classes?}
     
-    CheckMoreImages -->|Yes| LoopImages
-    CheckMoreImages -->|No| UpdateClassDetails[Update class_details Table]
+    CheckMoreSourceClasses -->|Yes| LoopMergeClasses
+    CheckMoreSourceClasses -->|No| DeleteSourceClasses[(DELETE FROM class_details<br/>WHERE class_name IN source_classes<br/>AND project_code = ?)]
     
-    UpdateClassDetails --> DeleteSourceClasses[Option 1: Delete Source Classes<br/>DELETE FROM class_details<br/>WHERE class_name IN source_classes<br/>AND project_code = ?]
+    DeleteSourceClasses --> CommitMergeTransaction[COMMIT Transaction]
+    CommitMergeTransaction --> LogMergeOperation[(Log to audit table<br/>operation_type = 'merge'<br/>source_classes, target_class<br/>images_affected)]
     
-    DeleteSourceClasses --> OR[OR]
+    LogMergeOperation --> ReturnMergeSuccess[Return Success Response<br/>with merge summary]
+    ReturnMergeSuccess --> UpdateMergeUI[Update Frontend UI]
+    UpdateMergeUI --> RefreshMergeClassList[Refresh Class List]
+    RefreshMergeClassList --> RefreshMergeImages[Refresh Image List]
+    RefreshMergeImages --> ShowMergeSuccess[Show Success Message<br/>with merge summary]
+    ShowMergeSuccess --> EndMerge([Merge Complete])
     
-    OR --> MarkInactive[Option 2: Mark as Merged<br/>UPDATE class_details<br/>SET is_active = 0,<br/>merged_into = target_class<br/>WHERE class_name IN source_classes]
+    %% CLASS SPLITTING PATH
+    MainMenu -->|Split Class| SplitStart([Class Splitting])
+    SplitStart --> CheckProjectSplit{Project Selected?}
+    CheckProjectSplit -->|No| SplitProjectError[Show Error:<br/>Select Project First]
+    SplitProjectError --> SplitStart
     
-    MarkInactive --> CommitTransaction[COMMIT Transaction]
+    CheckProjectSplit -->|Yes| SelectSourceClass[User Selects Source Class<br/>Class to split from]
+    SelectSourceClass --> ValidateSource{Source Class<br/>Exists?}
+    ValidateSource -->|No| SourceError[Show Error:<br/>Class does not exist]
+    SourceError --> SelectSourceClass
     
-    CommitTransaction --> LogOperation[Log Merge Operation<br/>to audit table]
+    ValidateSource -->|Yes| LoadSourceImages[Load Images<br/>from Source Class]
+    LoadSourceImages --> ShowImageGrid[Display Image Grid<br/>with Selection UI<br/>Checkboxes or Drag Selection]
     
-    LogOperation --> ReturnSuccess[Return Success Response]
+    ShowImageGrid --> UserSelectImages[User Selects Images<br/>to Split Out]
+    UserSelectImages --> CheckImagesSelected{At Least 1<br/>Image Selected?}
+    CheckImagesSelected -->|No| NoImagesError[Show Error:<br/>Select at least 1 image]
+    NoImagesError --> UserSelectImages
     
-    ReturnSuccess --> UpdateFrontend[Update Frontend UI]
+    CheckImagesSelected -->|Yes| CreateTargetClass[User Creates/Selects<br/>Target Class Name]
+    CreateTargetClass --> ValidateTargetName{Target Class Name<br/>Valid Format?}
+    ValidateTargetName -->|No| TargetNameError[Show Error:<br/>Invalid class name format]
+    TargetNameError --> CreateTargetClass
     
-    UpdateFrontend --> RefreshClassList[Refresh Class List]
-    RefreshClassList --> RefreshImageList[Refresh Image List]
-    RefreshImageList --> ShowSuccess[Show Success Message<br/>with merge summary]
+    ValidateTargetName -->|Yes| CheckTargetExistsSplit{Target Class<br/>Exists?}
+    CheckTargetExistsSplit -->|No| CreateNewClassSplit[Create New Class<br/>INSERT INTO class_details]
+    CheckTargetExistsSplit -->|Yes| ValidateTargetProject{Target Class<br/>Same Project?}
     
-    ShowSuccess --> End([Merge Complete])
+    CreateNewClassSplit --> ValidateTargetProject
+    ValidateTargetProject -->|No| SplitProjectMismatch[Show Error:<br/>Target class must be<br/>in same project]
+    SplitProjectMismatch --> CreateTargetClass
     
+    ValidateTargetProject -->|Yes| GetSelectedImageNames[Extract Image Names<br/>from Selected Images]
+    GetSelectedImageNames --> ShowSplitPreview[Show Preview:<br/>- Source class<br/>- Target class<br/>- Selected image count<br/>- Remaining image count<br/>- Option: Delete source if empty]
+    
+    ShowSplitPreview --> UserConfirmSplit{User Confirms Split?}
+    UserConfirmSplit -->|No| CancelSplit[Cancel Operation]
+    CancelSplit --> EndSplit
+    
+    UserConfirmSplit -->|Yes| StartSplitTransaction[Start Database Transaction<br/>BEGIN TRANSACTION]
+    
+    StartSplitTransaction --> LoopSplitImages{For Each Selected Image}
+    LoopSplitImages --> GetImageBinName[Get bin_name for Image<br/>from image_data]
+    
+    GetImageBinName --> ExtractYearMonth[Extract year/month<br/>from bin_name pattern<br/>IFCBXXX_YYYYMMDD...]
+    ExtractYearMonth --> GetSourcePathSplit[Source Path:<br/>project/year/month/source_class/image.png]
+    
+    GetSourcePathSplit --> GetTargetPathSplit[Target Path:<br/>project/year/month/target_class/image.png]
+    
+    GetTargetPathSplit --> CheckTargetFolderSplit{Target Folder<br/>Exists?}
+    CheckTargetFolderSplit -->|No| CreateTargetFolderSplit[Create Target Folder<br/>os.makedirs]
+    CheckTargetFolderSplit -->|Yes| UpdateImageRecord
+    
+    CreateTargetFolderSplit --> UpdateImageRecord[(UPDATE image_data<br/>SET class_name = target_class<br/>WHERE file_name = image_name<br/>AND class_name = source_class<br/>AND bin_name IN<br/>SELECT bin_name FROM bin_data<br/>WHERE project_code = ?)]
+    
+    UpdateImageRecord --> MovePhysicalFile[Move Physical File<br/>shutil.move source_path<br/>to target_path]
+    
+    MovePhysicalFile --> CheckMoreSplitImages{More Images<br/>to Process?}
+    CheckMoreSplitImages -->|Yes| LoopSplitImages
+    CheckMoreSplitImages -->|No| CheckSourceEmpty{Source Class<br/>Empty Now?]
+    
+    CheckSourceEmpty -->|Yes| CheckDeleteOption{User Selected<br/>Delete If Empty?}
+    CheckDeleteOption -->|Yes| DeleteSourceClass[(DELETE FROM class_details<br/>WHERE project_code = ?<br/>AND class_name = ?)]
+    CheckDeleteOption -->|No| KeepSourceClass[Keep Source Class<br/>with remaining images]
+    
+    CheckSourceEmpty -->|No| KeepSourceClass
+    DeleteSourceClass --> CommitSplitTransaction[COMMIT Transaction]
+    KeepSourceClass --> CommitSplitTransaction
+    
+    CommitSplitTransaction --> LogSplitOperation[(Log to audit table<br/>operation_type = 'split'<br/>source_class, target_class<br/>images_affected)]
+    
+    LogSplitOperation --> ReturnSplitSuccess[Return Success Response<br/>with split summary]
+    ReturnSplitSuccess --> UpdateSplitUI[Update Frontend UI]
+    UpdateSplitUI --> RefreshSplitClassList[Refresh Class List]
+    RefreshSplitClassList --> RefreshSplitImages[Refresh Image Lists<br/>for Both Classes]
+    RefreshSplitImages --> ShowSplitSuccess[Show Success Message<br/>with split summary]
+    ShowSplitSuccess --> EndSplit([Split Complete])
+    
+    %% END POINTS
+    EndProject --> Start
+    EndClassAdd --> Start
+    EndMerge --> Start
+    EndSplit --> Start
+    
+    %% STYLING
     style Start fill:#e1f5ff
-    style End fill:#c8e6c9
-    style StartTransaction fill:#fff3e0
-    style UpdateImages fill:#fff3e0
-    style MoveFiles fill:#fff3e0
-    style ShowError fill:#ffcdd2
-    style ShowPreview fill:#fff9c4
-```
-
-### Backend Changes for Class Merging
-
-**File: `main.py`**
-
-```python
-@app.post("/merge_classes")
-async def merge_classes(data: dict):
-    """Merge multiple source classes into a target class"""
-    try:
-        project_code = data.get('project_code')
-        source_classes = data.get('source_classes', [])  # List of class names
-        target_class = data.get('target_class')
-        
-        if not project_code or not source_classes or not target_class:
-            return {"error": "Missing required parameters"}
-        
-        if target_class in source_classes:
-            return {"error": "Target class cannot be in source classes list"}
-        
-        conn = sqlite3.connect(sqlite_db_path)
-        cursor = conn.cursor()
-        
-        # Start transaction
-        cursor.execute("BEGIN TRANSACTION")
-        
-        try:
-            # Verify all classes belong to the same project
-            placeholders = ','.join(['?'] * (len(source_classes) + 1))
-            query = f'''
-                SELECT DISTINCT project_code 
-                FROM class_details 
-                WHERE class_name IN ({placeholders})
-            '''
-            cursor.execute(query, source_classes + [target_class])
-            project_codes = [row[0] for row in cursor.fetchall()]
-            
-            if len(project_codes) != 1 or project_codes[0] != project_code:
-                raise ValueError("All classes must belong to the same project")
-            
-            # Get image counts before merge
-            image_counts = {}
-            for source_class in source_classes:
-                cursor.execute('''
-                    SELECT COUNT(*) FROM image_data id
-                    JOIN bin_data bd ON id.bin_name = bd.bin_name
-                    WHERE id.class_name = ? AND bd.project_code = ?
-                ''', (source_class, project_code))
-                image_counts[source_class] = cursor.fetchone()[0]
-            
-            # Update image_data table - move all images to target class
-            for source_class in source_classes:
-                # Get all images for this source class in this project
-                cursor.execute('''
-                    UPDATE image_data
-                    SET class_name = ?
-                    WHERE class_name = ?
-                    AND bin_name IN (
-                        SELECT bin_name FROM bin_data WHERE project_code = ?
-                    )
-                ''', (target_class, source_class, project_code))
-                
-                # Move physical files
-                # Get all unique year/month combinations for this class
-                cursor.execute('''
-                    SELECT DISTINCT 
-                        SUBSTR(bin_name, INSTR(bin_name, 'D') + 1, 6) as year_month
-                    FROM bin_data
-                    WHERE project_code = ?
-                ''', (project_code,))
-                
-                year_months = cursor.fetchall()
-                
-                for (year_month,) in year_months:
-                    year = year_month[:4]
-                    month = year_month[4:6]
-                    
-                    source_folder = os.path.join(
-                        data_directory, project_code, year, month, source_class
-                    )
-                    target_folder = os.path.join(
-                        data_directory, project_code, year, month, target_class
-                    )
-                    
-                    if os.path.exists(source_folder):
-                        # Create target folder if it doesn't exist
-                        os.makedirs(target_folder, exist_ok=True)
-                        
-                        # Move all files
-                        for filename in os.listdir(source_folder):
-                            source_path = os.path.join(source_folder, filename)
-                            target_path = os.path.join(target_folder, filename)
-                            shutil.move(source_path, target_path)
-                        
-                        # Remove empty source folder
-                        try:
-                            os.rmdir(source_folder)
-                        except OSError:
-                            pass  # Folder not empty or doesn't exist
-            
-            # Delete source classes from class_details (or mark as inactive)
-            cursor.execute(f'''
-                DELETE FROM class_details
-                WHERE class_name IN ({','.join(['?'] * len(source_classes))})
-                AND project_code = ?
-            ''', source_classes + [project_code])
-            
-            # Commit transaction
-            conn.commit()
-            
-            # Prepare response
-            total_images = sum(image_counts.values())
-            response = {
-                "message": f"Successfully merged {len(source_classes)} classes into '{target_class}'",
-                "merged_classes": source_classes,
-                "target_class": target_class,
-                "images_moved": total_images,
-                "image_counts": image_counts
-            }
-            
-            conn.close()
-            return response
-            
-        except Exception as e:
-            conn.rollback()
-            conn.close()
-            raise e
-            
-    except Exception as e:
-        return {"error": f"Failed to merge classes: {str(e)}"}
-```
-
-### Frontend Changes for Class Merging
-
-**File: `class.html` or new `merge_classes.html`**
-
-```javascript
-let selectedSourceClasses = new Set();
-
-function selectSourceClass(className) {
-    if (selectedSourceClasses.has(className)) {
-        selectedSourceClasses.delete(className);
-    } else {
-        selectedSourceClasses.add(className);
-    }
-    updateMergeUI();
-}
-
-function updateMergeUI() {
-    const sourceList = document.getElementById('source_classes_list');
-    sourceList.innerHTML = '';
+    style EndProject fill:#c8e6c9
+    style EndClassAdd fill:#c8e6c9
+    style EndMerge fill:#c8e6c9
+    style EndSplit fill:#c8e6c9
     
-    selectedSourceClasses.forEach(className => {
-        const div = document.createElement('div');
-        div.className = 'selected-class';
-        div.innerHTML = `
-            <span>${className}</span>
-            <button onclick="selectSourceClass('${className}')">Remove</button>
-        `;
-        sourceList.appendChild(div);
-    });
-    
-    document.getElementById('merge_button').disabled = 
-        selectedSourceClasses.size < 2 || !document.getElementById('target_class_select').value;
-}
-
-async function previewMerge() {
-    const projectCode = getSelectedProject();
-    const sourceClasses = Array.from(selectedSourceClasses);
-    const targetClass = document.getElementById('target_class_select').value;
-    
-    if (!targetClass || sourceClasses.length < 2) {
-        showError('Please select at least 2 source classes and a target class');
-        return;
-    }
-    
-    // Fetch image counts
-    const imageCounts = {};
-    for (const className of sourceClasses) {
-        const response = await fetch(
-            `/plankton_classifier/get_class_image_count/${projectCode}/${className}`
-        );
-        const data = await response.json();
-        imageCounts[className] = data.count || 0;
-    }
-    
-    // Show preview modal
-    showMergePreview(sourceClasses, targetClass, imageCounts);
-}
-
-async function executeMerge() {
-    const projectCode = getSelectedProject();
-    const sourceClasses = Array.from(selectedSourceClasses);
-    const targetClass = document.getElementById('target_class_select').value;
-    
-    if (!confirm(`Merge ${sourceClasses.length} classes into '${targetClass}'? This cannot be undone.`)) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/plankton_classifier/merge_classes', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                project_code: projectCode,
-                source_classes: sourceClasses,
-                target_class: targetClass
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.error) {
-            showError(result.error);
-        } else {
-            showSuccess(result.message);
-            console.log('Images moved:', result.images_moved);
-            refreshClassList(projectCode);
-            selectedSourceClasses.clear();
-            updateMergeUI();
-        }
-    } catch (error) {
-        showError('Failed to merge classes: ' + error.message);
-    }
-}
-```
-
----
-
-## 3. Class Splitting Flowchart
-
-```mermaid
-flowchart TD
-    Start([User Initiates Class Split]) --> SelectSource[User Selects Source Class<br/>Class to split]
-    
-    SelectSource --> ValidateSource{Source Class<br/>Exists?}
-    ValidateSource -->|No| ShowError[Show Error:<br/>Class does not exist]
-    ShowError --> SelectSource
-    
-    ValidateSource -->|Yes| LoadImages[Load Images<br/>from Source Class]
-    
-    LoadImages --> ShowImageGrid[Display Image Grid<br/>with Selection UI]
-    
-    ShowImageGrid --> UserSelect[User Selects Images<br/>to Split]
-    
-    UserSelect --> CreateTargetClass[User Creates/Selects<br/>Target Class Name]
-    
-    CreateTargetClass --> CheckTargetExists{Target Class<br/>Exists?}
-    CheckTargetExists -->|No| CreateNewClass[Create New Class<br/>in class_details]
-    CheckTargetExists -->|Yes| ValidateTarget{Target Class<br/>Same Project?}
-    
-    CreateNewClass --> ValidateTarget
-    ValidateTarget -->|No| ShowProjectError[Show Error:<br/>Target class must be<br/>in same project]
-    ShowProjectError --> CreateTargetClass
-    
-    ValidateTarget -->|Yes| ShowPreview[Show Preview:<br/>- Source class<br/>- Target class<br/>- Selected image count<br/>- Remaining image count]
-    
-    ShowPreview --> UserConfirm{User Confirms Split?}
-    UserConfirm -->|No| Cancel[Cancel Operation]
-    Cancel --> End
-    
-    UserConfirm -->|Yes| StartTransaction[Start Database Transaction]
-    
-    StartTransaction --> GetSelectedImages[Get Selected Image Names]
-    
-    GetSelectedImages --> UpdateImageData[Update image_data Table]
-    
-    UpdateImageData --> LoopImages{For Each Selected Image}
-    LoopImages --> UpdateRecord[UPDATE image_data<br/>SET class_name = target_class<br/>WHERE file_name = image_name<br/>AND class_name = source_class<br/>AND bin_name IN<br/>SELECT bin_name FROM bin_data<br/>WHERE project_code = ?]
-    
-    UpdateRecord --> MoveFile[Move Physical File]
-    
-    MoveFile --> GetImagePath[Get Image Path:<br/>Extract year/month from bin_name]
-    
-    GetImagePath --> GetSourcePath[Source Path:<br/>project/year/month/source_class/image.png]
-    
-    GetSourcePath --> GetTargetPath[Target Path:<br/>project/year/month/target_class/image.png]
-    
-    GetTargetPath --> CheckTargetFolder{Target Folder<br/>Exists?}
-    CheckTargetFolder -->|No| CreateFolder[Create Target Folder]
-    CheckTargetFolder -->|Yes| MovePhysicalFile[Move Image File]
-    CreateFolder --> MovePhysicalFile
-    
-    MovePhysicalFile --> CheckMoreImages{More Images<br/>to Process?}
-    CheckMoreImages -->|Yes| LoopImages
-    CheckMoreImages -->|No| CheckSourceEmpty{Source Class<br/>Empty Now?}
-    
-    CheckSourceEmpty -->|Yes| OptionDelete[Option: Delete Source Class<br/>if empty]
-    CheckSourceEmpty -->|No| KeepSource[Keep Source Class<br/>with remaining images]
-    
-    OptionDelete --> CommitTransaction[COMMIT Transaction]
-    KeepSource --> CommitTransaction
-    
-    CommitTransaction --> LogOperation[Log Split Operation<br/>to audit table]
-    
-    LogOperation --> ReturnSuccess[Return Success Response]
-    
-    ReturnSuccess --> UpdateFrontend[Update Frontend UI]
-    
-    UpdateFrontend --> RefreshClassList[Refresh Class List]
-    RefreshClassList --> RefreshImageList[Refresh Image List<br/>for Both Classes]
-    RefreshImageList --> ShowSuccess[Show Success Message<br/>with split summary]
-    
-    ShowSuccess --> End([Split Complete])
-    
-    style Start fill:#e1f5ff
-    style End fill:#c8e6c9
-    style StartTransaction fill:#fff3e0
+    style InsertProjectDB fill:#fff3e0
+    style InsertClassDB fill:#fff3e0
     style UpdateImageData fill:#fff3e0
-    style MoveFile fill:#fff3e0
-    style ShowError fill:#ffcdd2
-    style ShowPreview fill:#fff9c4
-```
-
-### Backend Changes for Class Splitting
-
-**File: `main.py`**
-
-```python
-@app.post("/split_class")
-async def split_class(data: dict):
-    """Split images from a source class into a target class"""
-    try:
-        project_code = data.get('project_code')
-        source_class = data.get('source_class')
-        target_class = data.get('target_class')
-        image_names = data.get('image_names', [])  # List of image file names
-        
-        if not all([project_code, source_class, target_class, image_names]):
-            return {"error": "Missing required parameters"}
-        
-        if source_class == target_class:
-            return {"error": "Source and target classes cannot be the same"}
-        
-        conn = sqlite3.connect(sqlite_db_path)
-        cursor = conn.cursor()
-        
-        # Start transaction
-        cursor.execute("BEGIN TRANSACTION")
-        
-        try:
-            # Verify both classes belong to the same project
-            cursor.execute('''
-                SELECT project_code FROM class_details
-                WHERE class_name IN (?, ?)
-                GROUP BY project_code
-            ''', (source_class, target_class))
-            
-            project_codes = [row[0] for row in cursor.fetchall()]
-            
-            if project_code not in project_codes or len(project_codes) != 1:
-                raise ValueError("Both classes must belong to the same project")
-            
-            # Check if target class exists, create if not
-            cursor.execute('''
-                SELECT * FROM class_details
-                WHERE project_code = ? AND class_name = ?
-            ''', (project_code, target_class))
-            
-            if not cursor.fetchone():
-                # Create target class
-                is_model_class = 1 if target_class in class_names else 0
-                cursor.execute('''
-                    INSERT INTO class_details
-                    (project_code, class_name, formatted_class_name, description, is_model_class)
-                    VALUES (?, ?, ?, ?, ?)
-                ''', (project_code, target_class, target_class.replace('_', ' ').title(), '', is_model_class))
-            
-            # Get image file names without extension for database lookup
-            image_names_no_ext = [img.replace('.png', '') for img in image_names]
-            
-            # Update image_data table
-            placeholders = ','.join(['?'] * len(image_names_no_ext))
-            cursor.execute(f'''
-                UPDATE image_data
-                SET class_name = ?
-                WHERE file_name IN ({placeholders})
-                AND class_name = ?
-                AND bin_name IN (
-                    SELECT bin_name FROM bin_data WHERE project_code = ?
-                )
-            ''', [target_class] + image_names_no_ext + [source_class, project_code])
-            
-            rows_updated = cursor.rowcount
-            
-            # Move physical files
-            moved_files = []
-            for image_name in image_names:
-                # Get bin_name for this image to extract year/month
-                cursor.execute('''
-                    SELECT id.bin_name, id.file_name
-                    FROM image_data id
-                    JOIN bin_data bd ON id.bin_name = bd.bin_name
-                    WHERE id.file_name = ? 
-                    AND id.class_name = ?
-                    AND bd.project_code = ?
-                    LIMIT 1
-                ''', (image_name.replace('.png', ''), target_class, project_code))
-                
-                result = cursor.fetchone()
-                if result:
-                    bin_name = result[0]
-                    
-                    # Extract year/month from bin_name (format: IFCBXXX_YYYYMMDD...)
-                    try:
-                        year_month_str = bin_name.split('D')[1][:6]
-                        year = year_month_str[:4]
-                        month = year_month_str[4:6]
-                    except:
-                        continue  # Skip if can't parse
-                    
-                    source_path = os.path.join(
-                        data_directory, project_code, year, month, source_class, image_name
-                    )
-                    target_path = os.path.join(
-                        data_directory, project_code, year, month, target_class, image_name
-                    )
-                    
-                    if os.path.exists(source_path):
-                        # Create target folder if it doesn't exist
-                        os.makedirs(os.path.dirname(target_path), exist_ok=True)
-                        
-                        # Move file
-                        shutil.move(source_path, target_path)
-                        moved_files.append(image_name)
-            
-            # Check if source class is now empty
-            cursor.execute('''
-                SELECT COUNT(*) FROM image_data id
-                JOIN bin_data bd ON id.bin_name = bd.bin_name
-                WHERE id.class_name = ? AND bd.project_code = ?
-            ''', (source_class, project_code))
-            
-            remaining_count = cursor.fetchone()[0]
-            
-            # Optionally delete source class if empty
-            delete_if_empty = data.get('delete_if_empty', False)
-            if delete_if_empty and remaining_count == 0:
-                cursor.execute('''
-                    DELETE FROM class_details
-                    WHERE project_code = ? AND class_name = ?
-                ''', (project_code, source_class))
-            
-            # Commit transaction
-            conn.commit()
-            
-            response = {
-                "message": f"Successfully split {len(moved_files)} images from '{source_class}' to '{target_class}'",
-                "source_class": source_class,
-                "target_class": target_class,
-                "images_moved": len(moved_files),
-                "remaining_in_source": remaining_count,
-                "database_rows_updated": rows_updated
-            }
-            
-            conn.close()
-            return response
-            
-        except Exception as e:
-            conn.rollback()
-            conn.close()
-            raise e
-            
-    except Exception as e:
-        return {"error": f"Failed to split class: {str(e)}"}
-```
-
-### Frontend Changes for Class Splitting
-
-**File: `class.html` or `reclassify.html`**
-
-```javascript
-let selectedImagesForSplit = new Set();
-
-function selectImageForSplit(imageSrc) {
-    if (selectedImagesForSplit.has(imageSrc)) {
-        selectedImagesForSplit.delete(imageSrc);
-    } else {
-        selectedImagesForSplit.add(imageSrc);
-    }
-    updateSplitUI();
-}
-
-function updateSplitUI() {
-    const count = selectedImagesForSplit.size;
-    document.getElementById('split_count').textContent = count;
-    document.getElementById('split_button').disabled = count === 0 || !document.getElementById('split_target_class').value;
-}
-
-async function showSplitDialog(sourceClass) {
-    // Load images from source class
-    const projectCode = getSelectedProject();
-    const images = await fetchClassImages(projectCode, sourceClass);
+    style DeleteSourceClasses fill:#fff3e0
+    style UpdateImageRecord fill:#fff3e0
+    style DeleteSourceClass fill:#fff3e0
     
-    // Show split UI with image grid
-    showSplitModal(sourceClass, images);
-}
-
-async function executeSplit() {
-    const projectCode = getSelectedProject();
-    const sourceClass = document.getElementById('split_source_class').value;
-    const targetClass = document.getElementById('split_target_class').value;
-    const imageUrls = Array.from(selectedImagesForSplit);
+    style AuthError fill:#ffcdd2
+    style EmailError fill:#ffcdd2
+    style CodeError fill:#ffcdd2
+    style PhoneError fill:#ffcdd2
+    style CoordError fill:#ffcdd2
+    style TitleError fill:#ffcdd2
+    style ProjectError fill:#ffcdd2
+    style NameError fill:#ffcdd2
+    style FormatError fill:#ffcdd2
+    style ReturnClassErr fill:#ffcdd2
+    style SelectionError fill:#ffcdd2
+    style TargetError fill:#ffcdd2
+    style ProjectMismatch fill:#ffcdd2
+    style SourceError fill:#ffcdd2
+    style NoImagesError fill:#ffcdd2
+    style TargetNameError fill:#ffcdd2
+    style SplitProjectMismatch fill:#ffcdd2
     
-    // Extract image names from URLs
-    const imageNames = imageUrls.map(url => url.split('/').pop());
+    style ShowModelWarning fill:#fff9c4
+    style ShowMergePreview fill:#fff9c4
+    style ShowSplitPreview fill:#fff9c4
     
-    if (!targetClass || imageNames.length === 0) {
-        showError('Please select a target class and at least one image');
-        return;
-    }
-    
-    // Validate target class name format
-    if (!/^[a-z0-9_]+$/.test(targetClass)) {
-        showError('Target class name must be lowercase with underscores only');
-        return;
-    }
-    
-    if (!confirm(`Split ${imageNames.length} images from '${sourceClass}' to '${targetClass}'?`)) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/plankton_classifier/split_class', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                project_code: projectCode,
-                source_class: sourceClass,
-                target_class: targetClass,
-                image_names: imageNames,
-                delete_if_empty: document.getElementById('delete_if_empty').checked
-            })
-        });
-        
-        const result = await response.json();
-        
-        if (result.error) {
-            showError(result.error);
-        } else {
-            showSuccess(result.message);
-            console.log('Images moved:', result.images_moved);
-            console.log('Remaining in source:', result.remaining_in_source);
-            
-            // Refresh UI
-            refreshClassList(projectCode);
-            refreshImageList(projectCode, sourceClass);
-            if (result.remaining_in_source === 0) {
-                // Source class was deleted, refresh class list
-                refreshClassList(projectCode);
-            }
-            
-            selectedImagesForSplit.clear();
-            closeSplitModal();
-        }
-    } catch (error) {
-        showError('Failed to split class: ' + error.message);
-    }
-}
+    style StartMergeTransaction fill:#e3f2fd
+    style StartSplitTransaction fill:#e3f2fd
+    style CommitMergeTransaction fill:#e3f2fd
+    style CommitSplitTransaction fill:#e3f2fd
 ```
 
 ---
 
-## Database Schema Changes
+## Detailed Operation Breakdowns
 
-### Required Migration
+### 1. Project Creation Flow
 
-**File: `migrations/migrate_class_details.sql`**
+**Frontend Steps:**
+1. User fills project form with all required fields
+2. Client-side validation:
+   - Email format validation
+   - Project code: 3 alphanumeric characters
+   - Phone format validation (optional)
+   - Latitude/Longitude: numeric values
+   - Title: no URLs allowed
+3. Authentication check: User must be logged in
+4. Submit to `/submit` endpoint
 
+**Backend Steps:**
+1. Check if project already exists
+2. If exists: UPDATE projects table
+3. If new: INSERT INTO projects table
+4. If classes provided: Process each class
+   - Validate class name format
+   - Check if class is in model training set
+   - Set `is_model_class` flag accordingly
+   - INSERT INTO class_details for each class
+5. COMMIT transaction
+6. Return success response
+
+**Database Operations:**
 ```sql
--- Add project_code column to class_details
-ALTER TABLE class_details ADD COLUMN project_code TEXT;
+-- Project creation
+INSERT INTO projects (
+    project_code, project_title, description, poc_name,
+    poc_email, poc_phone, latitude, longitude, area,
+    project_start, project_end, privacy_status
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
 
--- Add is_model_class column
-ALTER TABLE class_details ADD COLUMN is_model_class INTEGER DEFAULT 1;
+-- Class creation during project creation
+INSERT INTO class_details (
+    project_code, class_name, formatted_class_name,
+    description, is_model_class
+) VALUES (?, ?, ?, ?, ?);
+```
 
--- Migrate existing data
-UPDATE class_details 
-SET project_code = (
-    SELECT DISTINCT bd.project_code 
-    FROM bin_data bd 
-    JOIN image_data id ON bd.bin_name = id.bin_name 
-    WHERE id.class_name = class_details.class_name 
-    LIMIT 1
-)
-WHERE project_code IS NULL;
+---
 
--- Set default for remaining NULLs
-UPDATE class_details 
-SET project_code = 'DEFAULT' 
-WHERE project_code IS NULL;
+### 2. Class Addition Flow
 
--- Create unique constraint on (project_code, class_name)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_class_details_project_class 
+**Frontend Steps:**
+1. Verify project is selected
+2. Display class creation form
+3. User enters class details
+4. Client-side validation:
+   - Class name: lowercase with underscores only
+   - Formatted name: required
+   - Description: optional
+5. Check if class is in model (optional warning)
+6. Submit to `/create_class` endpoint
+
+**Backend Steps:**
+1. Validate project exists
+2. Check if class already exists for project
+3. Validate class name format
+4. Check if class is in model training set
+5. Set `is_model_class` flag
+6. INSERT INTO class_details
+7. Check unique constraint (project_code, class_name)
+8. COMMIT transaction
+9. Return response with `is_model_class` flag
+
+**Database Operations:**
+```sql
+-- Check project exists
+SELECT * FROM projects WHERE project_code = ?;
+
+-- Check class exists
+SELECT * FROM class_details 
+WHERE project_code = ? AND class_name = ?;
+
+-- Insert class
+INSERT INTO class_details (
+    project_code, class_name, formatted_class_name,
+    description, is_model_class
+) VALUES (?, ?, ?, ?, ?);
+```
+
+---
+
+### 3. Class Merging Flow
+
+**Frontend Steps:**
+1. Verify project is selected
+2. Load classes for project
+3. Display multi-select interface
+4. User selects 2+ source classes
+5. User selects target class
+6. Validate selection:
+   - At least 2 source classes
+   - Target not in source list
+   - All classes same project
+7. Fetch image counts for preview
+8. Show preview with counts
+9. User confirms
+10. Submit to `/merge_classes` endpoint
+
+**Backend Steps:**
+1. Validate all classes belong to same project
+2. Get image counts for each source class
+3. Start transaction
+4. For each source class:
+   - UPDATE image_data: change class_name to target
+   - Get all year/month combinations
+   - For each year/month:
+     - Move files from source folder to target folder
+     - Remove empty source folders
+5. DELETE source classes from class_details
+6. COMMIT transaction
+7. Log operation to audit table
+8. Return merge summary
+
+**Database Operations:**
+```sql
+-- Update image classifications
+UPDATE image_data
+SET class_name = ?
+WHERE class_name = ?
+AND bin_name IN (
+    SELECT bin_name FROM bin_data WHERE project_code = ?
+);
+
+-- Delete source classes
+DELETE FROM class_details
+WHERE class_name IN (?, ?, ...)
+AND project_code = ?;
+
+-- Log operation
+INSERT INTO class_operations_audit (
+    operation_type, project_code, source_classes,
+    target_class, images_affected, performed_by
+) VALUES ('merge', ?, ?, ?, ?, ?);
+```
+
+**File System Operations:**
+```python
+# For each source class and year/month combination:
+source_path = f"{data_directory}/{project_code}/{year}/{month}/{source_class}/"
+target_path = f"{data_directory}/{project_code}/{year}/{month}/{target_class}/"
+
+# Create target folder if needed
+os.makedirs(target_path, exist_ok=True)
+
+# Move all files
+for filename in os.listdir(source_path):
+    shutil.move(
+        os.path.join(source_path, filename),
+        os.path.join(target_path, filename)
+    )
+
+# Remove empty source folder
+os.rmdir(source_path)
+```
+
+---
+
+### 4. Class Splitting Flow
+
+**Frontend Steps:**
+1. Verify project is selected
+2. User selects source class
+3. Load images from source class
+4. Display image grid with selection UI
+5. User selects images to split
+6. User enters/selects target class name
+7. Validate target class name format
+8. Check if target class exists (create if needed)
+9. Show preview with counts
+10. User confirms (option: delete source if empty)
+11. Submit to `/split_class` endpoint
+
+**Backend Steps:**
+1. Validate source class exists
+2. Check/create target class
+3. Validate both classes same project
+4. Start transaction
+5. For each selected image:
+   - Get bin_name from image_data
+   - Extract year/month from bin_name
+   - UPDATE image_data: change class_name to target
+   - Move physical file from source to target folder
+6. Check if source class is empty
+7. Optionally DELETE source class if empty
+8. COMMIT transaction
+9. Log operation to audit table
+10. Return split summary
+
+**Database Operations:**
+```sql
+-- Get image bin_name
+SELECT bin_name, file_name
+FROM image_data
+WHERE file_name = ?
+AND class_name = ?
+AND bin_name IN (
+    SELECT bin_name FROM bin_data WHERE project_code = ?
+);
+
+-- Update image classification
+UPDATE image_data
+SET class_name = ?
+WHERE file_name = ?
+AND class_name = ?
+AND bin_name IN (
+    SELECT bin_name FROM bin_data WHERE project_code = ?
+);
+
+-- Check if source class empty
+SELECT COUNT(*) FROM image_data id
+JOIN bin_data bd ON id.bin_name = bd.bin_name
+WHERE id.class_name = ? AND bd.project_code = ?;
+
+-- Delete source class if empty
+DELETE FROM class_details
+WHERE project_code = ? AND class_name = ?;
+
+-- Log operation
+INSERT INTO class_operations_audit (
+    operation_type, project_code, source_classes,
+    target_class, images_affected, performed_by
+) VALUES ('split', ?, ?, ?, ?, ?);
+```
+
+**File System Operations:**
+```python
+# Extract year/month from bin_name (format: IFCBXXX_YYYYMMDD...)
+year_month_str = bin_name.split('D')[1][:6]
+year = year_month_str[:4]
+month = year_month_str[4:6]
+
+source_path = f"{data_directory}/{project_code}/{year}/{month}/{source_class}/{image_name}"
+target_path = f"{data_directory}/{project_code}/{year}/{month}/{target_class}/{image_name}"
+
+# Create target folder if needed
+os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+# Move file
+shutil.move(source_path, target_path)
+```
+
+---
+
+## Database Schema
+
+### projects Table
+```sql
+CREATE TABLE projects (
+    project_code TEXT PRIMARY KEY,
+    project_title TEXT NOT NULL,
+    description TEXT,
+    poc_name TEXT,
+    poc_email TEXT,
+    poc_phone TEXT,
+    latitude REAL,
+    longitude REAL,
+    area TEXT,
+    project_start DATE,
+    project_end DATE,
+    privacy_status TEXT
+);
+```
+
+### class_details Table
+```sql
+CREATE TABLE class_details (
+    class_name TEXT NOT NULL,
+    formatted_class_name TEXT NOT NULL,
+    description TEXT,
+    project_code TEXT NOT NULL,
+    is_model_class INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_code, class_name)
+);
+
+CREATE UNIQUE INDEX idx_class_details_project_class 
 ON class_details(project_code, class_name);
 
--- Create index for faster project lookups
-CREATE INDEX IF NOT EXISTS idx_class_details_project 
+CREATE INDEX idx_class_details_project 
 ON class_details(project_code);
+```
 
--- Optional: Add audit table for tracking operations
-CREATE TABLE IF NOT EXISTS class_operations_audit (
+### class_operations_audit Table
+```sql
+CREATE TABLE class_operations_audit (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     operation_type TEXT NOT NULL,  -- 'add', 'merge', 'split', 'delete'
     project_code TEXT NOT NULL,
@@ -884,111 +620,169 @@ CREATE TABLE IF NOT EXISTS class_operations_audit (
     performed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_project ON class_operations_audit(project_code);
-CREATE INDEX IF NOT EXISTS idx_audit_type ON class_operations_audit(operation_type);
+CREATE INDEX idx_audit_project ON class_operations_audit(project_code);
+CREATE INDEX idx_audit_type ON class_operations_audit(operation_type);
 ```
 
 ---
 
-## Backend Endpoints Summary
+## API Endpoints Summary
 
-### New Endpoints Required
+### Project Operations
+- **POST `/submit`** - Create or update project
+  - Input: Project data + optional classes array
+  - Output: Success message
 
-1. **POST `/create_class`** - Create a new class for a project
-   - Input: `project_code`, `class_name`, `formatted_class_name`, `description`
-   - Output: Success message with `is_model_class` flag
+### Class Operations
+- **POST `/create_class`** - Create a new class for a project
+  - Input: `project_code`, `class_name`, `formatted_class_name`, `description`
+  - Output: Success message with `is_model_class` flag
 
-2. **POST `/merge_classes`** - Merge multiple classes into one
-   - Input: `project_code`, `source_classes[]`, `target_class`
-   - Output: Merge summary with image counts
+- **POST `/merge_classes`** - Merge multiple classes into one
+  - Input: `project_code`, `source_classes[]`, `target_class`
+  - Output: Merge summary with image counts
 
-3. **POST `/split_class`** - Split images from one class to another
-   - Input: `project_code`, `source_class`, `target_class`, `image_names[]`, `delete_if_empty`
-   - Output: Split summary with remaining counts
+- **POST `/split_class`** - Split images from one class to another
+  - Input: `project_code`, `source_class`, `target_class`, `image_names[]`, `delete_if_empty`
+  - Output: Split summary with remaining counts
 
-4. **GET `/get_class_image_count/{project_code}/{class_name}`** - Get image count for a class
-   - Output: `{"count": number}`
+- **GET `/get_project_classes/{project_code}`** - Get all classes for a project
+  - Output: List of classes with metadata
 
-5. **GET `/get_project_classes/{project_code}`** - Get all classes for a project
-   - Output: List of classes with metadata
-
-### Updated Endpoints
-
-1. **GET `/class_names`** - Now accepts `project_code` parameter
-2. **GET `/moveImageToFolder`** - Already exists, may need project_code validation
-
----
-
-## Frontend Components Summary
-
-### New UI Components Needed
-
-1. **Class Creation Form**
-   - Input fields for class name, formatted name, description
-   - Project selection
-   - Validation and error display
-
-2. **Class Merge Interface**
-   - Multi-select for source classes
-   - Target class selector
-   - Preview with image counts
-   - Confirmation dialog
-
-3. **Class Split Interface**
-   - Image grid with selection
-   - Target class input/selector
-   - Preview with selected image count
-   - Option to delete source class if empty
-
-### Updated Components
-
-1. **Class List Display** - Filter by project
-2. **Image Grid** - Show project-specific classes
-3. **Reclassify Interface** - Validate against project classes
-
----
-
-## Implementation Order
-
-1. ✅ **Database Migration** - Add `project_code` to `class_details`
-2. ✅ **Backend: Class Addition** - Implement `/create_class` endpoint
-3. ✅ **Frontend: Class Addition** - Build class creation UI
-4. ✅ **Backend: Class Merging** - Implement `/merge_classes` endpoint
-5. ✅ **Frontend: Class Merging** - Build merge interface
-6. ✅ **Backend: Class Splitting** - Implement `/split_class` endpoint
-7. ✅ **Frontend: Class Splitting** - Build split interface
-8. ✅ **Testing** - Test all operations with various scenarios
-9. ✅ **Documentation** - Update user documentation
+- **GET `/get_class_image_count/{project_code}/{class_name}`** - Get image count
+  - Output: `{"count": number}`
 
 ---
 
 ## Error Handling
 
-All operations should handle:
-- Database constraint violations
-- File system errors
-- Missing projects/classes
-- Invalid image references
-- Transaction rollbacks on failure
-- User-friendly error messages
+### Common Errors and Solutions
+
+1. **Project Code Already Exists**
+   - Error: Project with this code already exists
+   - Solution: Use different code or update existing project
+
+2. **Class Already Exists**
+   - Error: Class already exists for this project
+   - Solution: Use different class name or merge instead
+
+3. **Invalid Class Name Format**
+   - Error: Class name must be lowercase with underscores only
+   - Solution: Use format like `class_name` not `ClassName` or `class-name`
+
+4. **Classes from Different Projects**
+   - Error: Cannot merge/split classes from different projects
+   - Solution: Ensure all classes belong to same project
+
+5. **Target Class in Source List**
+   - Error: Target class cannot be in source classes list
+   - Solution: Select different target class
+
+6. **File System Errors**
+   - Error: Failed to move files
+   - Solution: Check file permissions, disk space, path validity
+
+7. **Database Constraint Violations**
+   - Error: Unique constraint violation
+   - Solution: Check for duplicate (project_code, class_name) combinations
+
+---
+
+## Transaction Management
+
+All operations that modify multiple database records or files use transactions:
+
+1. **Class Merging**: 
+   - Updates multiple image_data records
+   - Moves multiple files
+   - Deletes class_details records
+   - All in one transaction with rollback on failure
+
+2. **Class Splitting**:
+   - Updates multiple image_data records
+   - Moves multiple files
+   - Optionally deletes class_details
+   - All in one transaction with rollback on failure
+
+3. **Project Creation with Classes**:
+   - Inserts project
+   - Inserts multiple classes
+   - All in one transaction
 
 ---
 
 ## Security Considerations
 
-- Validate user permissions for project operations
-- Sanitize file paths to prevent directory traversal
-- Validate class names to prevent injection
-- Log all operations for audit trail
-- Confirm destructive operations (merge, split) with user
+1. **Authentication**: Users must be logged in for project creation
+2. **Authorization**: Validate user permissions for project operations
+3. **Input Validation**: 
+   - Sanitize all inputs
+   - Validate file paths to prevent directory traversal
+   - Validate class names to prevent injection
+4. **Audit Logging**: Log all operations for compliance and debugging
+5. **Transaction Safety**: Use transactions to ensure data consistency
 
 ---
 
-## Notes
+## Testing Checklist
 
-- All operations are project-scoped
-- Classes can have the same name in different projects
-- Model classes vs. manual classes are tracked via `is_model_class`
-- Physical file operations must match database updates
-- Transactions ensure data consistency
+### Project Creation
+- [ ] Create project without classes
+- [ ] Create project with classes
+- [ ] Create project with model classes
+- [ ] Create project with non-model classes
+- [ ] Update existing project
+- [ ] Validate all input fields
+- [ ] Test authentication requirement
 
+### Class Addition
+- [ ] Add class to existing project
+- [ ] Add model class
+- [ ] Add non-model class
+- [ ] Try to add duplicate class (should fail)
+- [ ] Add class to non-existent project (should fail)
+- [ ] Validate class name format
+
+### Class Merging
+- [ ] Merge 2 classes successfully
+- [ ] Merge 3+ classes successfully
+- [ ] Verify all images moved correctly
+- [ ] Verify source classes deleted
+- [ ] Verify file system updated correctly
+- [ ] Try to merge classes from different projects (should fail)
+- [ ] Try to use target class in source list (should fail)
+
+### Class Splitting
+- [ ] Split images to existing class
+- [ ] Split images to new class (should create class)
+- [ ] Verify selected images moved
+- [ ] Verify remaining images stay in source
+- [ ] Test delete_if_empty option
+- [ ] Verify file system updated correctly
+- [ ] Split to class in different project (should fail)
+
+---
+
+## Implementation Notes
+
+1. **All operations are project-scoped** - Classes belong to projects
+2. **Same class name can exist in different projects** - Unique constraint is `(project_code, class_name)`
+3. **File operations must match database updates** - Use transactions
+4. **Model classes vs. manual classes** - Tracked via `is_model_class` flag
+5. **Always validate project_code** - Operations must be within same project
+6. **Use transactions** - Ensure atomicity of database and file operations
+7. **Log operations** - Maintain audit trail for debugging and compliance
+8. **Handle edge cases** - Empty folders, missing files, permission errors
+
+---
+
+## Quick Reference
+
+- **Project Creation**: Form → Validation → POST /submit → Database Insert → (Optional) Class Creation
+- **Class Addition**: Select Project → Form → Validation → POST /create_class → Database Insert
+- **Class Merging**: Select Project → Select Sources → Select Target → Preview → POST /merge_classes → Update DB + Move Files
+- **Class Splitting**: Select Project → Select Source → Select Images → Create/Select Target → Preview → POST /split_class → Update DB + Move Files
+
+---
+
+This comprehensive flowchart covers all aspects of the class management system, from project creation through all class operations, with detailed database and file system operations included.
