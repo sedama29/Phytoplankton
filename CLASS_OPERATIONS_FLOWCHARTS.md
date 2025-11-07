@@ -250,7 +250,7 @@ flowchart TD
     
     MovePhysicalFile --> CheckMoreSplitImages{More Images<br/>to Process?}
     CheckMoreSplitImages -->|Yes| LoopSplitImages
-    CheckMoreSplitImages -->|No| CheckSourceEmpty{Source Class<br/>Empty Now?]
+    CheckMoreSplitImages -->|No| CheckSourceEmpty{Source Class<br/>Empty Now?}
     
     CheckSourceEmpty -->|Yes| CheckDeleteOption{User Selected<br/>Delete If Empty?}
     CheckDeleteOption -->|Yes| DeleteSourceClass[(DELETE FROM class_details<br/>WHERE project_code = ?<br/>AND class_name = ?)]
